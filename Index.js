@@ -9,7 +9,8 @@ const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
-const ytdl = require('ytdl-core'); // Herramienta para YouTube
+const yts = require('yt-search'); // Para buscar canciones
+const ytdl = require('@distube/ytdl-core'); // Versión reparada de ytdl
 
 // Leer configuración
 const configPath = path.join(__dirname, 'data', 'config.json');
@@ -25,34 +26,30 @@ async function iniciarBot() {
         printQRInTerminal: false, 
         browser: Browsers.ubuntu('Chrome'),
         logger: pino({ level: 'silent' }),
-        syncFullHistory: false // ⚡ Evita sincronización lenta
+        syncFullHistory: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
-        
-        // Lógica de código de emparejamiento
         if (qr && config.telefono) {
             let code = await sock.requestPairingCode(config.telefono);
             console.log("\n🔑 TU CÓDIGO: ", code?.match(/.{1,4}/g)?.join("-") || code);
         }
-
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) iniciarBot();
             else process.exit();
         } else if (connection === 'open') {
-            console.log('\n✅ ¡BOT CONECTADO Y LISTO!');
+            console.log('\n✅ ¡BOT CONECTADO!');
         }
     });
 
-    // 👂 ESCUCHAR MENSAJES
     sock.ev.on('messages.upsert', async m => {
         const msg = m.messages[0];
         if (!msg.message || m.type !== 'notify') return;
-        if (msg.key.fromMe) return; // Ignorar mensajes propios
+        if (msg.key.fromMe) return;
 
         const body = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         const from = msg.key.remoteJid;
@@ -67,7 +64,6 @@ async function iniciarBot() {
         const args = body.slice(config.prefijo.length).trim().split(' ');
         const command = args.shift().toLowerCase(); 
 
-        // Si el bot está apagado y no eres el dueño, no responde
         if (!config.activo && !isOwner) return;
 
         try {
@@ -78,7 +74,7 @@ async function iniciarBot() {
 🚦 Estado: ${config.activo ? '🟢 Activo' : '🔴 Apagado'}
 
 📥 DESCARGAS
-• ${config.prefijo}play (YouTube)
+• ${config.prefijo}play (nombre o link)
 • ${config.prefijo}tiktok (Enlace)
 • ${config.prefijo}fb (Enlace)
 
@@ -98,48 +94,47 @@ async function iniciarBot() {
                 });
             }
 
-            // 📥 PLAY (YouTube)
+            // 🎵 PLAY (CORREGIDO)
             if (command === 'play') {
-                if (args.length === 0) return sock.sendMessage(from, { text: '❌ Escribe qué quieres buscar. Ej: .play Despacito' });
+                if (args.length === 0) return sock.sendMessage(from, { text: '❌ ¿Qué quieres escuchar? Ej: .play Bad Bunny' });
                 
-                await sock.sendMessage(from, { text: '⏳ Descargando audio...' });
+                let linkVideo = '';
                 
-                try {
-                    // Busca el video y descarga el audio
-                    const info = await ytdl.getInfo(`https://www.youtube.com/results?search_query=${args.join(' ')}`); 
-                    // Nota: ytdl necesita el link directo o buscamos uno. 
-                    // Para simplificar en este bot básico, usaremos una API de terceros o asumiremos link directo.
-                    // Si envías el link directo funciona 100%.
-                    
-                    // Si el usuario envía un link directo:
-                    if (args[0].includes('youtube.com') || args[0].includes('youtu.be')) {
-                         await sock.sendMessage(from, { 
-                             audio: { url: args[0] }, // Truco rápido: Baileys a veces baja link directo si es audio
-                             mimetype: 'audio/mp4' 
-                         }); 
-                    } else {
-                         sock.sendMessage(from, { text: '⚠️ Para .play envía el link del video de YouTube.' });
-                    }
-                } catch (e) {
-                    sock.sendMessage(from, { text: '❌ Error descargando.' });
+                // Si es un link, úsalo directo. Si es texto, búscalo.
+                if (args[0].includes('youtube.com') || args[0].includes('youtu.be')) {
+                    linkVideo = args.join(' ');
+                } else {
+                    const busqueda = await yts(args.join(' '));
+                    if (busqueda.videos.length === 0) return sock.sendMessage(from, { text: '❌ No encontré esa canción.' });
+                    linkVideo = busqueda.videos[0].url;
                 }
+
+                await sock.sendMessage(from, { text: '🎧 Descargando audio...' });
+                
+                const info = await ytdl.getInfo(linkVideo);
+                const audioStream = ytdl(linkVideo, { filter: 'audioonly', quality: 'highestaudio' });
+
+                await sock.sendMessage(from, {
+                    audio: audioStream,
+                    mimetype: 'audio/mp4',
+                    contextInfo: { externalAdReply: { title: info.videoDetails.title, body: '🎵 Música descargada por ' + config.nombre, mediaType: 2, thumbnail: (await axios.get(info.videoDetails.thumbnails[0].url, { responseType: 'arraybuffer' })).data, sourceUrl: linkVideo } }
+                });
             }
 
-            // 🎵 TIKTOK (Vía API)
+            // 🎵 TIKTOK
             if (command === 'tiktok') {
                 if (!args[0]) return sock.sendMessage(from, { text: '❌ Envía el link de TikTok.' });
                 await sock.sendMessage(from, { text: '⏳ Descargando TikTok...' });
                 try {
-                    // API pública (puede fallar si está saturada)
                     const { data } = await axios.get(`https://api.dorrin.com/api/tiktok?url=${args[0]}`);
                     if (data.result && data.result.video) {
-                        return sock.sendMessage(from, { video: { url: data.result.video }, caption: '✨ TikTok' });
+                        return sock.sendMessage(from, { video: { url: data.result.video }, caption: '✨ TikTok sin marca de agua' });
                     }
                     sock.sendMessage(from, { text: '❌ No se pudo descargar.' });
                 } catch (e) { sock.sendMessage(from, { text: '❌ Error en la API.' }); }
             }
 
-            // 📘 FACEBOOK (Vía API)
+            // 📘 FACEBOOK
             if (command === 'fb') {
                 if (!args[0]) return sock.sendMessage(from, { text: '❌ Envía el link de Facebook.' });
                 await sock.sendMessage(from, { text: '⏳ Descargando Facebook...' });
@@ -152,11 +147,9 @@ async function iniciarBot() {
                 } catch (e) { sock.sendMessage(from, { text: '❌ Error descargando.' }); }
             }
 
-            // 👢 KICK (Solo Owner / Admin)
+            // 👢 KICK
             if (command === 'kick') {
-                if (!isOwner) return sock.sendMessage(from, { text: '🚫 Solo el creador puede usar esto.' });
-                if (!from.endsWith('@g.us')) return sock.sendMessage(from, { text: '⚠️ Comando solo para grupos.' });
-                
+                if (!isOwner) return sock.sendMessage(from, { text: '🚫 Solo el creador.' });
                 const mentioned = msg.message.extendedTextMessage?.contextInfo?.mentionedJid;
                 if (mentioned) {
                     await sock.groupParticipantsUpdate(from, mentioned, 'remove');
@@ -165,19 +158,19 @@ async function iniciarBot() {
                 sock.sendMessage(from, { text: '❌ Menciona a alguien (@usuario).' });
             }
             
-            // 🚪 ABRIR / CERRAR GRUPO
+            // 🚪 OPEN / CLOSE
             if (command === 'open') {
                 if (!isOwner) return;
                 await sock.groupSettingUpdate(from, 'not_announcement');
                 return sock.sendMessage(from, { text: '🔓 Grupo abierto.' });
             }
-            if (command === 'close' || command === 'cerrar') {
+            if (command === 'close') {
                 if (!isOwner) return;
                 await sock.groupSettingUpdate(from, 'announcement');
                 return sock.sendMessage(from, { text: '🔒 Grupo cerrado.' });
             }
 
-            // 🛡️ CREADOR: ON / OFF
+            // 🛡️ CREADOR
             if (command === 'off') {
                 if (!isOwner) return;
                 config.activo = false;
@@ -190,25 +183,21 @@ async function iniciarBot() {
                 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
                 return sock.sendMessage(from, { text: '🟢 Bot encendido.' });
             }
-
-            // 🛡️ CREADOR: PREFIJO / NOMBRE
             if (command === 'cambiar-prefijo') {
                 if (!isOwner || !args[0]) return;
                 config.prefijo = args[0];
                 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-                return sock.sendMessage(from, { text: `✅ Prefijo cambiado a: ${args[0]}` });
+                return sock.sendMessage(from, { text: `✅ Prefijo: ${args[0]}` });
             }
-
             if (command === 'cambiar-nombre') {
                 if (!isOwner || args.length === 0) return;
                 config.nombre = args.join(' ');
                 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-                return sock.sendMessage(from, { text: `✅ Nombre cambiado a: ${config.nombre}` });
+                return sock.sendMessage(from, { text: `✅ Nombre: ${config.nombre}` });
             }
 
         } catch (err) {
             console.error(err);
-            // No responder con error para no spamear al usuario
         }
     });
 }
