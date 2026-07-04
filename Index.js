@@ -10,7 +10,6 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const yts = require('yt-search'); // Para buscar canciones
-const ytdl = require('@distube/ytdl-core'); // Versión reparada de ytdl
 
 // Leer configuración
 const configPath = path.join(__dirname, 'data', 'config.json');
@@ -94,31 +93,35 @@ async function iniciarBot() {
                 });
             }
 
-            // 🎵 PLAY (CORREGIDO)
+            // 🎵 PLAY (ARREGLADO CON API EXTERNA)
             if (command === 'play') {
                 if (args.length === 0) return sock.sendMessage(from, { text: '❌ ¿Qué quieres escuchar? Ej: .play Bad Bunny' });
                 
-                let linkVideo = '';
-                
-                // Si es un link, úsalo directo. Si es texto, búscalo.
-                if (args[0].includes('youtube.com') || args[0].includes('youtu.be')) {
-                    linkVideo = args.join(' ');
-                } else {
-                    const busqueda = await yts(args.join(' '));
-                    if (busqueda.videos.length === 0) return sock.sendMessage(from, { text: '❌ No encontré esa canción.' });
-                    linkVideo = busqueda.videos[0].url;
+                let videoUrl = args.join(' ');
+                if (!videoUrl.includes('youtube.com') && !videoUrl.includes('youtu.be')) {
+                    await sock.sendMessage(from, { text: '🔍 Buscando...' });
+                    const search = await yts(videoUrl);
+                    if (search.videos.length === 0) return sock.sendMessage(from, { text: '❌ No encontré esa canción.' });
+                    videoUrl = search.videos[0].url;
                 }
 
-                await sock.sendMessage(from, { text: '🎧 Descargando audio...' });
-                
-                const info = await ytdl.getInfo(linkVideo);
-                const audioStream = ytdl(linkVideo, { filter: 'audioonly', quality: 'highestaudio' });
+                await sock.sendMessage(from, { text: '⏳ Descargando audio...' });
+                try {
+                    // API externa que evita el bloqueo de YouTube
+                    const api = `https://api.siputzx.my.id/api/dl/ytmp3?url=${encodeURIComponent(videoUrl)}`;
+                    const res = await axios.get(api);
 
-                await sock.sendMessage(from, {
-                    audio: audioStream,
-                    mimetype: 'audio/mp4',
-                    contextInfo: { externalAdReply: { title: info.videoDetails.title, body: '🎵 Música descargada por ' + config.nombre, mediaType: 2, thumbnail: (await axios.get(info.videoDetails.thumbnails[0].url, { responseType: 'arraybuffer' })).data, sourceUrl: linkVideo } }
-                });
+                    if (res.data.status && res.data.result) {
+                        return sock.sendMessage(from, {
+                            audio: { url: res.data.result },
+                            mimetype: 'audio/mp4',
+                            fileName: 'Izraelita03.mp3'
+                        });
+                    }
+                    sock.sendMessage(from, { text: '❌ La API está ocupada. Intenta en unos segundos.' });
+                } catch (err) {
+                    sock.sendMessage(from, { text: '❌ Error al descargar. Verifica el enlace.' });
+                }
             }
 
             // 🎵 TIKTOK
@@ -128,7 +131,7 @@ async function iniciarBot() {
                 try {
                     const { data } = await axios.get(`https://api.dorrin.com/api/tiktok?url=${args[0]}`);
                     if (data.result && data.result.video) {
-                        return sock.sendMessage(from, { video: { url: data.result.video }, caption: '✨ TikTok sin marca de agua' });
+                        return sock.sendMessage(from, { video: { url: data.result.video }, caption: '✨ TikTok' });
                     }
                     sock.sendMessage(from, { text: '❌ No se pudo descargar.' });
                 } catch (e) { sock.sendMessage(from, { text: '❌ Error en la API.' }); }
