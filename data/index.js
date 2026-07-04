@@ -8,7 +8,6 @@ const {
 const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
-// Ya no necesitamos qrcode-terminal si usaremos código, pero lo dejamos por si acaso
 
 // Leer configuración
 const configPath = path.join(__dirname, 'data', 'config.json');
@@ -31,18 +30,18 @@ async function iniciarBot() {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // 🔥 AQUÍ ESTÁ LA MAGIA DEL CÓDIGO DE ENLACE
+        // 🔥 Lógica para generar CÓDIGO DE ENLACE en lugar de QR
         if (qr) {
             if (config.telefono) {
-                // Solicitar código de emparejamiento
+                // Pedimos el código a WhatsApp usando el número del config
                 let code = await sock.requestPairingCode(config.telefono);
                 code = code?.match(/.{1,4}/g)?.join("-") || code;
                 console.log("\n━━━━━━━━━━━━━━━━━━━━");
-                console.log("🔑 TU CÓDIGO DE ENLACE ES: ", code);
+                console.log("🔑 TU CÓDIGO ES: ", code);
                 console.log("━━━━━━━━━━━━━━━━━━━━\n");
-                console.log("📲 Ve a WhatsApp > Dispositivos vinculados > Vincular dispositivo > Vincular con número de teléfono");
+                console.log("📲 Ve a WhatsApp > Dispositivos vinculados > Vincular con número de teléfono > Escribe el código");
             } else {
-                console.log("⚠️ No configuraste un número en config.json. Usa QR.");
+                console.log("⚠️ Error: No pusiste tu número en config.json");
             }
         }
 
@@ -51,11 +50,11 @@ async function iniciarBot() {
             if (shouldReconnect) {
                 iniciarBot();
             } else {
-                console.log("❌ Sesión cerrada. Revisa tu WhatsApp.");
+                console.log("❌ Sesión cerrada.");
                 process.exit();
             }
         } else if (connection === 'open') {
-            console.log('\n✅ ¡BOT CONECTADO Y LISTO!');
+            console.log('\n✅ ¡BOT CONECTADO!');
         }
     });
 
@@ -68,6 +67,7 @@ async function iniciarBot() {
         const from = msg.key.remoteJid;
         const sender = msg.key.participant || msg.key.remoteJid;
         
+        // Verificar si es el dueño
         const myNumber = config.owner.replace(/\D/g, '');
         const senderNumber = sender.replace(/\D/g, '');
         const isOwner = myNumber === senderNumber;
@@ -113,10 +113,6 @@ async function iniciarBot() {
                 config.prefijo = args[0];
                 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
                 return sock.sendMessage(from, { text: `✅ Nuevo prefijo: ${args[0]}` });
-            }
-
-            if (['play', 'tiktok', 'fb'].includes(comando)) {
-                return sock.sendMessage(from, { text: `⏳ Descargando... (Próximamente)` });
             }
 
         } catch (err) {
