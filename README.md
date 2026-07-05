@@ -4,7 +4,7 @@
     <p style="color: #ffcccc; margin: 8px 0 0 0; font-size: 0.95em; letter-spacing: 1px;">⚡ BOT INTELIGENTE PARA WHATSAPP ⚡</p>
   </div>
   <img src="https://raw.githubusercontent.com/IrokzDal/data/main/1783012094847.jpeg" width="230" style="border-radius: 50%; border: 4px solid #ff0000; box-shadow: 0 0 25px rgba(255, 0, 0, 0.5); margin-bottom: 20px;" alt="Logo DairoBot"/>
-  <h2 style="color: #ff3333;">🤖 Bienvenido al Bot Dairo 🤖</h2>
+  <h2 style="color: #ff3333;">🤖 Bienvenido al Bot Izraelita03 🤖</h2>
   <p style="max-width: 600px; color: #cccccc; font-size: 1em;">
     Un asistente ligero, estable y personalizable para WhatsApp. Diseñado desde cero para correr en <b>Termux</b> con instalación sencilla, comandos útiles para grupos y descargas multimedia.
   </p>
